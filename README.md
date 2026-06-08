@@ -59,9 +59,27 @@ If `secrets.h.example` does not exist yet, create `secrets.h` manually:
 
 ### WebSocket (`ws://<device-ip>:81`)
 
-The controller accepts text commands and broadcasts JSON status messages.
+The controller speaks two protocols on the same connection:
 
-**Commands sent to the controller:**
+#### Artisan protocol (request/response)
+
+Artisan polls the device on its sample interval. The controller responds with the current temperature readings.
+
+**Request** (sent by Artisan):
+```json
+{"command": "getData", "id": 12345, "machine": 0}
+```
+
+**Response** (sent by controller):
+```json
+{"id": 12345, "data": {"BT": 195.3, "ET": 210.0}}
+```
+
+`BT` and `ET` are currently stubbed at `0.0` pending sensor integration. When sensors are added, populate the `btTemp` and `etTemp` globals in the firmware.
+
+#### Plain-text commands
+
+Artisan sliders and any other client send plain-text commands. Token delimiters are space, comma, semicolon, or equals sign. Commands are case-insensitive.
 
 | Command | Example | Description |
 |---------|---------|-------------|
@@ -72,8 +90,6 @@ The controller accepts text commands and broadcasts JSON status messages.
 | `OT2 UP` | `OT2 UP` | Increase fan by `DUTY_STEP` |
 | `OT2 DOWN` | `OT2 DOWN` | Decrease fan by `DUTY_STEP` |
 | `LOG` | `LOG` | Retrieve the error log (sent only to requesting client) |
-
-Token delimiters: space, comma, semicolon, or equals sign. Commands are case-insensitive.
 
 **Status broadcast** (sent to all clients on any state change, and to new clients on connect):
 
@@ -146,6 +162,26 @@ Errors are generated for:
 - DimmerLink error register polled every 5 seconds during operation
 
 Retrieve the log at any time by sending `LOG` over WebSocket.
+
+---
+
+## Artisan integration
+
+A ready-to-import Artisan settings file is provided at `artisan/airRoaster_v01.aset` in this repo.
+
+**Before importing**, open the file in a text editor and replace `<device-ip>` with your ESP32's IP address (shown on the OLED at startup). Then import via **File › Load Settings** in Artisan.
+
+| Artisan setting | Value |
+|-----------------|-------|
+| Device | WebSocket (id 111) |
+| Host | your ESP32's IP |
+| Port | 81 |
+| BT channel | `BT` node |
+| ET channel | `ET` (inlet temp, stubbed until sensor added) |
+| Slider 0 | Fan — sends `OT2;<value>` |
+| Slider 1 | Heat — sends `OT1;<value>` |
+
+Temperature channels (`BT`, `ET`) return `0.0` until physical sensors are wired and the `btTemp`/`etTemp` globals are populated in the firmware.
 
 ---
 

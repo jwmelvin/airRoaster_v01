@@ -8,12 +8,12 @@ ESP32-based controller for a hot-air coffee roaster. Controls a heating element 
 
 | Component | Details |
 |-----------|---------|
-| MCU | ESP32 (any variant with I2C and WiFi) |
-| Display | SH1107 64×128 OLED, I2C address `0x3C` |
-| Heat dimmer | RBDimmer DimmerLink, I2C address `0x51` |
-| Fan dimmer | RBDimmer DimmerLink, I2C address `0x52` |
-
-Both dimmers are on the same I2C bus as the display. The dimmer curve is set to mode `1` at startup.
+| MCU | ESP32-S3 Feather with 4MB Flash 2MB PSRAM, https://www.adafruit.com/product/5477 (any ESP32 variant with I2C and WiFi) |
+| Display | FeatherWing OLED - 128x64 OLED, https://www.adafruit.com/product/4650 (SH1107 64×128 OLED), I2C address `0x3C` |
+| Dimmer interface | RBDimmer DimmerLink, https://www.rbdimmer.com/docs/dimmerlink-overview, I2C address heat: `0x51`; fan: `0x52`, curve is set to mode `1` at startup. |
+| Dimmers |Dimmers purchased from RobotDyn Official Store on AliExpress.  |
+| Heater | from sdm2020_tools on eBay and listed as "1 set 230V 3600W 132.387 Heating Element & mica casing for hot air blower guns". Its power in my use is a little higher because I use 240V.|
+| Blower | Ametek 116392-00 |
 
 ---
 

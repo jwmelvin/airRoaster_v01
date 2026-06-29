@@ -179,10 +179,13 @@ sTune is still the intended tool for the `TUNE` step-test routine (phase 3).
    heat; `INLET`/`INLET OFF`/`OT1`-override mode switching with bumpless
    transfer; `PID` live-tuning + `STAT` commands.~~ **done (v0.3.0)** — gains
    are untuned placeholders.
-3. `TUNE` routine (sTune step test) + reporting; identify FOPDT at center fan
-   (~57), spot-check at 50 / 65. **next**
+3. ~~`TUNE` routine (open-loop step test) + reporting; FOPDT fit + SIMC PI
+   suggestions.~~ **done (v0.4.0)** — implemented inline (two-point FOPDT fit,
+   SIMC tight/conservative gains) rather than with sTune, for full control over
+   step safety/abort and to stay dependency-free + compile-checkable here.
+   Operator still needs to run it at center fan (~57) and spot-check 50 / 65.
 4. Feedforward power map (2–3 points across 50/57/65) + lambda/IMC gains from
-   step (3); add gain scheduling only if band-edge validation needs it.
+   step (3); add gain scheduling only if band-edge validation needs it. **next**
 5. Validation roasts: step + ramp setpoints, deliberate mid-roast fan changes;
    measure tracking/overshoot/settling and confirm robustness. Tune λ.
 6. ~~Docs: README control-mode section.~~ **done (v0.3.0)** — Artisan

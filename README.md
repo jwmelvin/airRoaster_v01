@@ -96,6 +96,10 @@ Artisan sliders and any other client send plain-text commands. Token delimiters 
 | `INLET OFF` | `INLET OFF` | Disengage closed-loop control; heat holds at its current level |
 | `PID` | `PID` | Report current PID gains, setpoint, and mode |
 | `PID <kp ki kd>` | `PID 1.5 0.05 0` | Set PID gains live (for manual tuning) |
+| `TUNE` | `TUNE` | Run an open-loop step test and suggest PI gains (see [Tuning](#tuning)) |
+| `TUNE <pct>` | `TUNE 20` | Step test with a specific heat step (% points) |
+| `TUNE ABORT` | `TUNE ABORT` | Cancel a running step test |
+| `TUNE APPLY` | `TUNE APPLY` | Apply the last test's "tight" suggested gains |
 | `STAT` | `STAT` | Report and reset the control-cadence jitter watch (worst late-fire, µs) |
 | `IL` | `IL` | Toggle interlock mode between hard and soft (see [Fan interlock](#fan-interlock)) |
 | `LOG` | `LOG` | Retrieve the error log (sent only to requesting client) |
@@ -118,7 +122,7 @@ All unsolicited messages use Artisan's push message envelope so any client can u
 | `fan` | Fan level (%) |
 | `ilCap` | Current heat ceiling imposed by the interlock (0–100%); `0` means heat is fully blocked, `100` means unrestricted |
 | `ilSoft` | `true` if soft (linear) interlock mode is active; `false` for hard (binary) mode |
-| `mode` | `"manual"` (heat set directly by `OT1`) or `"inlet"` (heat modulated by the closed loop) |
+| `mode` | `"manual"` (heat set directly by `OT1`), `"inlet"` (heat modulated by the closed loop), or `"tune"` (a step test is running) |
 | `inSV` | Inlet setpoint (°C) in use when `mode` is `"inlet"` |
 
 **Error broadcast** (sent to all clients when an error is logged):
@@ -214,15 +218,49 @@ Key properties:
 
 > ⚠️ The default gains (`pidKp`/`pidKi`/`pidKd` in the firmware) are **untuned
 > placeholders** and are not expected to control well. Characterize the plant
-> and tune before relying on closed-loop control.
+> with `TUNE` (below) and apply gains before relying on closed-loop control.
 
 - `PID` reports the current gains, setpoint, and mode.
 - `PID <kp> <ki> <kd>` sets the gains live over WebSocket/serial, so you can tune
   without recompiling.
 
-A step-test autotune routine (sTune) and a fan-scheduled feedforward power map —
-the mechanisms for robustness against airflow changes — are planned next; see
-the plan in `work.md`.
+#### Autotune (`TUNE`)
+
+`TUNE` runs an **open-loop step test**: it holds the current heat to measure a
+baseline inlet temperature, applies a heat step, records the response, fits a
+first-order-plus-dead-time (FOPDT) model (two-point 28.3%/63.2% method), and
+suggests PI gains via the SIMC rule at two robustness levels.
+
+**Procedure**
+
+1. Set the fan to a representative level (your normal roasting range) and a
+   moderate heat, and let the inlet temperature settle.
+2. Send `TUNE` (default step) or `TUNE <pct>` (e.g. `TUNE 20`). The display shows
+   `Tuning...` and `mode` becomes `tune`.
+3. The test holds baseline (~8 s), steps heat up, and watches until the response
+   flattens (or a 180 s cap). Heat returns to baseline and mode returns to
+   `manual` automatically.
+4. The result is broadcast as a `tune` push message:
+   ```json
+   {"pushMessage":"tune","data":{"ok":true,"fan":57,"step":15,"dT":42.3,
+     "Kp":2.82,"tau":18.5,"theta":3.2,
+     "tight":{"kp":1.97,"ki":0.13},"cons":{"kp":0.79,"ki":0.05}}}
+   ```
+   - `Kp` (°C/%), `tau`, `theta` (s) are the identified plant model.
+   - `tight` is the brisker suggestion (tracking-first); `cons` is more
+     conservative. Start with `tight`, fall back to `cons` if it overshoots or
+     oscillates.
+5. Apply gains with `TUNE APPLY` (uses the `tight` set) or `PID <kp> <ki> <kd>`
+   to enter a chosen pair manually. Then `INLET <degC>` to run closed-loop.
+
+**Safety / aborts.** The step goes through the fan interlock, so inadequate
+airflow aborts the test (`interlock capped step`). It also aborts on over-temp
+(`> 280 °C` inlet) and on any `OT1`/`INLET`/`TUNE ABORT`. A failed fit reports
+`{"ok":false,"reason":...}`.
+
+Because plant gain and time constant vary with airflow, run `TUNE` at the center
+of your fan range (~57); a fan-scheduled feedforward power map — the main
+mechanism for robustness against airflow changes — is the next phase (`work.md`).
 
 ## OLED display layout
 

@@ -163,14 +163,14 @@ In both modes:
 
 ```
 +--------------------------------+
-|  (reserved)                    |  ROW1
+|  airRoaster vX.Y.Z             |  ROW1 (firmware version)
 |  Heat: 60        Req: 60       |  ROW2
 |  Fan: 50                       |  ROW3
 |  IL:H ok                       |  ROW4 (interlock status — see below)
 |                                |  ROW5
 |  192.168.1.42                  |  ROW6 (IP address or "No WiFi")
 |                                |  ROW7
-|                                |  ROW8
+|  B:198.4 E:212.0 I:264.1       |  ROW8 (BT / ET / inlet temps, °C)
 +--------------------------------+
 ```
 
@@ -210,12 +210,25 @@ A ready-to-import Artisan settings file is provided at `artisan/airRoaster_v01.a
 | Device | WebSocket (id 111) |
 | Host | your ESP32's IP |
 | Port | 81 |
-| BT channel | `BT` node |
-| ET channel | `ET` (inlet temp, stubbed until sensor added) |
+| Input 1 → BT | `BT` node — bean RTD (the connected probe) |
+| Input 2 → ET | `ET` node — second RTD (no probe yet; reads ~0) |
+| Input 3 → IN | `IN` node — inlet thermocouple |
 | Slider 0 | Fan — sends `OT2;<value>` |
 | Slider 1 | Heat — sends `OT1;<value>` |
 
-Temperature channels (`BT`, `ET`) return `0.0` until physical sensors are wired and the `btTemp`/`etTemp` globals are populated in the firmware.
+**Configuring the WebSocket inputs.** In Artisan, under **Config › Port ›
+WebSocket**, set the input node names to match the firmware's JSON fields:
+**Input 1: `BT`, Input 2: `ET`, Input 3: `IN`** (i.e. `channel_nodes=BT, ET, IN`
+in the `.aset`). The node names just select which JSON field feeds each curve.
+
+If a channel reads 0 °C / 32 °F while live data appears on a *different* curve,
+the cause is almost always the **firmware** reading the wrong board for that
+channel — confirm `CS_RTD_BT` points at the MAX31865 the bean probe is actually
+wired to (see [hardware/pins.md](hardware/pins.md)). It is *not* an Artisan
+channel-order issue.
+
+The `ET` channel returns `0.0` until a second RTD probe is wired and
+`RTD_ET_ENABLED` is set to `1` in the firmware.
 
 ### Adding more sensors
 

@@ -1,3 +1,11 @@
+// ===========================================================================
+// airRoaster v01 — ESP32-S3 hot-air coffee roaster controller
+//
+// Firmware version: see FW_VERSION below.
+// Change history:   bottom of this file.
+// (Intentionally no "last edited" date in this header — it only goes stale.
+//  The top entry of the version history is the real last-changed date.)
+// ===========================================================================
 #include <Wire.h>
 #include <SPI.h>
 #include <Adafruit_GFX.h>
@@ -8,6 +16,11 @@
 #include <Adafruit_MAX31865.h>
 
 // ---------------------------------------------------------------------------
+// Firmware identity
+// ---------------------------------------------------------------------------
+#define FW_VERSION  "0.2.1"
+
+// ---------------------------------------------------------------------------
 // WiFi credentials (defined in secrets.h — do not commit that file)
 // ---------------------------------------------------------------------------
 #include "secrets.h"
@@ -15,9 +28,12 @@
 // ---------------------------------------------------------------------------
 // Sensor SPI chip-select pins  (assign free GPIOs to suit your wiring)
 // ---------------------------------------------------------------------------
-#define CS_RTD_BT   10   // MAX31865 (product 3648) — bean temp RTD
-#define CS_RTD_ET   9    // MAX31865 (product 3648) — exhaust/ET RTD
+#define CS_RTD_BT   10   // MAX31865 (product 3648) — bean temp RTD (connected probe)
+#define CS_RTD_ET   9    // MAX31865 (product 3648) — exhaust/ET RTD (no probe yet — disabled below)
 #define CS_TC_IN    8    // MAX31855 (product 269)  — inlet thermocouple
+
+// Set to 1 when the ET RTD probe is installed and filtered
+#define RTD_ET_ENABLED  0
 
 // MAX31865 wiring type: MAX31865_2WIRE / MAX31865_3WIRE / MAX31865_4WIRE
 #define RTD_WIRES   MAX31865_4WIRE
@@ -28,6 +44,15 @@
 
 // Sensor poll interval (ms) — much shorter than Artisan's sample rate
 #define SENSOR_INTERVAL_MS  250
+
+// Robust-read parameters (dimmer EMI tolerance — see hardware/emi.md)
+#define RTD_VALID_MIN_C       -20.0f  // plausibility window for accepting a reading
+#define RTD_VALID_MAX_C        600.0f
+#define RTD_READ_DISAGREE_C    2.0f   // two same-cycle reads differing by more => SPI glitch, hold
+#define SENSOR_FAULT_DEBOUNCE  4      // consecutive bad reads before a channel is declared faulted
+#define SENSOR_REFAULT_LOG_MS  5000   // min interval between repeated fault-log entries (anti-flood)
+#define RTD_MEDIAN_WINDOW      5      // samples in the median filter (set 1 to disable)
+#define RTD_REASSERT_MS        5000   // re-assert VBIAS/auto-convert this often (silent-stall guard)
 
 // ---------------------------------------------------------------------------
 // DimmerLink I2C addresses and registers
@@ -49,8 +74,8 @@
 #define DL_INIT_RETRY_DELAY_MS  500   // ms between initDL ready-check retries
 
 // Interlock config
-#define IL_FAN_MIN      23   // fan level below which heat is always 0
-#define IL_FAN_FULL     30   // fan level at or above which heat is unrestricted
+#define IL_FAN_MIN      48   // fan level below which heat is always 0
+#define IL_FAN_FULL     55   // fan level at or above which heat is unrestricted
 #define IL_HEAT_AT_MIN  30   // heat cap (%) when fan is exactly at IL_FAN_MIN (soft mode)
 
 // ---------------------------------------------------------------------------
@@ -74,6 +99,21 @@ volatile bool flagDisplayUpdate;
 static Adafruit_MAX31865 rtdBT(CS_RTD_BT);
 static Adafruit_MAX31865 rtdET(CS_RTD_ET);
 static Adafruit_MAX31855 tcIN(CS_TC_IN);
+
+// Per-channel fault tracking (debounce + rate-limited logging) and, for the
+// RTDs, a median-filter ring buffer and the stall-guard re-assert timer.
+struct SensorFaultState {
+    uint8_t  badCount;                // consecutive bad reads
+    bool     faulted;                 // currently in the (logged) faulted state
+    uint32_t lastLogMs;               // last time a fault was logged for this channel
+    uint32_t lastReassertMs;          // last VBIAS/auto-convert re-assert (RTD only)
+    float    hist[RTD_MEDIAN_WINDOW]; // recent accepted readings (RTD only)
+    uint8_t  histHead;                // next write index into hist[]
+    uint8_t  histCount;              // valid entries in hist[]
+};
+static SensorFaultState rtdBTfault = {0, false, 0, 0, {0}, 0, 0};
+static SensorFaultState rtdETfault = {0, false, 0, 0, {0}, 0, 0};
+static SensorFaultState tcINfault  = {0, false, 0, 0, {0}, 0, 0};
 
 // ---------------------------------------------------------------------------
 // Display
@@ -168,6 +208,7 @@ void broadcastStatus();
 bool handleArtisanRequest(uint8_t clientNum, const String& msg);
 void initSensors();
 void updateSensors();
+void serviceRtd(Adafruit_MAX31865 &dev, SensorFaultState &st, float &out, const char *name);
 
 // ===========================================================================
 // Sensors — init and periodic update
@@ -179,49 +220,115 @@ void initSensors() {
     rtdBT.begin(RTD_WIRES);
     rtdET.begin(RTD_WIRES);
 
-    // Continuous conversion mode: bias on, auto-convert on, fault detection cleared.
-    // The MAX31865 re-triggers each conversion automatically once this is set.
-    rtdBT.enableBias(true);
-    rtdET.enableBias(true);
-    rtdBT.autoConvert(true);
-    rtdET.autoConvert(true);
+    // Clear any startup faults first, then enable continuous conversion.
+    // Order matters: clearFault() resets config bits, so bias and autoConvert must come after.
     rtdBT.clearFault();
+    rtdBT.enableBias(true);
+    rtdBT.autoConvert(true);
+#if RTD_ET_ENABLED
     rtdET.clearFault();
+    rtdET.enableBias(true);
+    rtdET.autoConvert(true);
+#endif
 
     Serial.println("Sensors initialized");
 }
 
+// Median of the valid entries in a channel's history ring (order doesn't matter).
+static float rtdMedian(const SensorFaultState &st) {
+    float tmp[RTD_MEDIAN_WINDOW];
+    uint8_t n = st.histCount;
+    for (uint8_t i = 0; i < n; i++) tmp[i] = st.hist[i];
+    for (uint8_t i = 1; i < n; i++) {          // insertion sort (n is tiny)
+        float key = tmp[i];
+        int8_t j = i - 1;
+        while (j >= 0 && tmp[j] > key) { tmp[j + 1] = tmp[j]; j--; }
+        tmp[j + 1] = key;
+    }
+    return tmp[n / 2];
+}
+
+// Robust RTD read. Rejects single-cycle SPI glitches (two disagreeing reads),
+// median-filters accepted samples (rejects single-sample spikes), debounces
+// genuine faults, holds the last good value through brief transients, periodically
+// re-asserts VBIAS/auto-convert to guard against a silently-stalled converter, and
+// keeps the converter alive after a fault. See hardware/emi.md for the noise story.
+void serviceRtd(Adafruit_MAX31865 &dev, SensorFaultState &st, float &out, const char *name) {
+    uint32_t now = millis();
+
+    // Stall guard: a transient can silently clear VBIAS/auto-convert in the config
+    // register, freezing conversions while temperature() keeps returning the last
+    // latched (stale-but-plausible) value. Re-assert them periodically so the
+    // converter always recovers within RTD_REASSERT_MS even with no fault flag set.
+    if (now - st.lastReassertMs >= RTD_REASSERT_MS) {
+        st.lastReassertMs = now;
+        dev.enableBias(true);
+        dev.autoConvert(true);
+    }
+
+    // Two reads this cycle: if they disagree wildly, the SPI frame was probably
+    // corrupted by a dimmer transient — hold the last good value, retry next cycle.
+    float t1 = dev.temperature(RTD_NOMINAL, RTD_REF);
+    float t2 = dev.temperature(RTD_NOMINAL, RTD_REF);
+    if (fabsf(t1 - t2) > RTD_READ_DISAGREE_C) return;
+
+    float t = 0.5f * (t1 + t2);
+
+    // Good reading — accept even if a transient fault flag was momentarily set.
+    if (t > RTD_VALID_MIN_C && t < RTD_VALID_MAX_C) {
+        st.hist[st.histHead] = t;                     // push into the median ring
+        st.histHead = (st.histHead + 1) % RTD_MEDIAN_WINDOW;
+        if (st.histCount < RTD_MEDIAN_WINDOW) st.histCount++;
+        out = rtdMedian(st);                          // output the median, not the raw sample
+        st.badCount = 0;
+        st.faulted  = false;
+        return;
+    }
+
+    // Out of range and consistent across both reads — candidate genuine fault.
+    if (st.badCount < 255) st.badCount++;
+
+    uint8_t fault = dev.readFault();
+    dev.clearFault();              // recover the converter so it keeps running
+    dev.enableBias(true);
+    dev.autoConvert(true);
+    // 'out' intentionally holds its last good value (do not zero) during the fault.
+
+    if (st.badCount < SENSOR_FAULT_DEBOUNCE) return;  // ignore brief transients
+
+    if (!st.faulted || (now - st.lastLogMs) >= SENSOR_REFAULT_LOG_MS) {
+        st.faulted   = true;
+        st.lastLogMs = now;
+        char msg[48];
+        snprintf(msg, sizeof(msg), "MAX31865 %s fault: 0x%02X", name, fault);
+        logError(msg);
+    }
+}
+
 void updateSensors() {
-    // --- MAX31865: bean temp RTD ---
-    uint8_t faultBT = rtdBT.readFault();
-    if (faultBT == 0) {
-        btTemp = rtdBT.temperature(RTD_NOMINAL, RTD_REF);
-    } else {
-        char msg[48];
-        snprintf(msg, sizeof(msg), "MAX31865 BT fault: 0x%02X", faultBT);
-        logError(msg);
-        rtdBT.clearFault();
-    }
+    serviceRtd(rtdBT, rtdBTfault, btTemp, "BT");
+#if RTD_ET_ENABLED
+    serviceRtd(rtdET, rtdETfault, etTemp, "ET");
+#endif
 
-    // --- MAX31865: exhaust / ET RTD ---
-    uint8_t faultET = rtdET.readFault();
-    if (faultET == 0) {
-        etTemp = rtdET.temperature(RTD_NOMINAL, RTD_REF);
-    } else {
-        char msg[48];
-        snprintf(msg, sizeof(msg), "MAX31865 ET fault: 0x%02X", faultET);
-        logError(msg);
-        rtdET.clearFault();
-    }
-
-    // --- MAX31855: inlet thermocouple ---
+    // --- MAX31855: inlet thermocouple (holds last good value on fault) ---
     double tc = tcIN.readCelsius();
     if (!isnan(tc)) {
         inTemp = (float)tc;
+        tcINfault.badCount = 0;
+        tcINfault.faulted  = false;
     } else {
-        char msg[48];
-        snprintf(msg, sizeof(msg), "MAX31855 IN fault: 0x%02X", tcIN.readError());
-        logError(msg);
+        if (tcINfault.badCount < 255) tcINfault.badCount++;
+        if (tcINfault.badCount >= SENSOR_FAULT_DEBOUNCE) {
+            uint32_t now = millis();
+            if (!tcINfault.faulted || (now - tcINfault.lastLogMs) >= SENSOR_REFAULT_LOG_MS) {
+                tcINfault.faulted   = true;
+                tcINfault.lastLogMs = now;
+                char msg[48];
+                snprintf(msg, sizeof(msg), "MAX31855 IN fault: 0x%02X", tcIN.readError());
+                logError(msg);
+            }
+        }
     }
 }
 
@@ -232,6 +339,8 @@ void setup() {
     Serial.begin(115200);
     Wire.begin();
     delay(250);
+
+    Serial.printf("\nairRoaster firmware v%s\n", FW_VERSION);
 
     // Display init
     display.begin(0x3C, true);
@@ -362,6 +471,9 @@ bool handleArtisanRequest(uint8_t clientNum, const String& msg) {
 // Display update
 // ===========================================================================
 void displayUpdate() {
+    display.setCursor(COL1A, ROW1 * ROWHEIGHT);
+    display.printf("airRoaster v%s", FW_VERSION);
+
     display.setCursor(COL1A, ROW2 * ROWHEIGHT);
     display.printf("Heat: %u", heatLevel);
     display.setCursor(COL2A, ROW2 * ROWHEIGHT);
@@ -673,3 +785,22 @@ void loop() {
         flagDisplayUpdate = false;
     }
 }
+
+// ===========================================================================
+// Version history
+// ---------------------------------------------------------------------------
+// v0.2.1  2026-06-28  RTD read robustness: periodic VBIAS/auto-convert re-assert
+//                     (guards against a silently-stalled converter), and a median
+//                     filter over recent samples (rejects single-sample spikes).
+//                     Also: BT mapped to the connected board (CS_RTD_BT=10); the
+//                     empty board is ET (CS=9), gated off via RTD_ET_ENABLED.
+// v0.2.0  2026-06-28  Sensor integration: 2x MAX31865 PT1000 (BT/ET) + MAX31855
+//                     K-type (inlet), 3-channel Artisan output (BT/ET/IN),
+//                     temps on OLED. Robust RTD reads — same-cycle glitch
+//                     rejection, fault debounce, hold-last-good, rate-limited
+//                     fault logging. ET RTD behind RTD_ET_ENABLED gate (no probe
+//                     yet). BT/ET CS pins swapped to match wiring.
+// v0.1.0  (baseline)  Dual DimmerLink heat/fan control, WebSocket + Artisan
+//                     protocol, plain-text/serial commands, OLED status, fan
+//                     interlock (hard/soft), RAM error log.
+// ===========================================================================

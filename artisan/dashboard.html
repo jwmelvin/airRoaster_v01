@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>airRoaster dashboard</title>
+<style>
+  body { font-family: sans-serif; padding: 1em; max-width: 700px; }
+  #out { background: #1e1e1e; color: #d4d4d4; padding: 1em; min-height: 200px;
+         font-family: monospace; font-size: 0.85em; white-space: pre-wrap;
+         border-radius: 4px; margin-top: 0.75em; }
+  .error  { color: #f48771; }
+  .log    { color: #9cdcfe; }
+  .status { color: #b5cea8; }
+  .other  { color: #d4d4d4; }
+  input  { font-size: 1em; padding: 0.3em 0.5em; width: 160px; }
+  #cmd   { width: 280px; }
+  button { font-size: 1em; padding: 0.3em 0.8em; margin-left: 0.4em; cursor: pointer; }
+  .cmdbar { margin-top: 0.75em; }
+  .quick  { margin-top: 0.5em; }
+  .quick button { margin: 0.15em 0.3em 0.15em 0; font-size: 0.85em; padding: 0.2em 0.6em; }
+  .quick .sep { color: #888; font-size: 0.8em; margin: 0 0.2em 0 0.6em; }
+  .sent { color: #c586c0; }
+  details.commission { margin-top: 1em; border: 1px solid #ccc; border-radius: 4px; padding: 0.4em 0.8em; }
+  details.commission summary { font-weight: bold; cursor: pointer; }
+  details.commission ol { padding-left: 1.4em; }
+  details.commission li { margin: 0.7em 0; }
+  details.commission .desc { font-size: 0.85em; color: #555; display: block; margin-bottom: 0.3em; }
+  details.commission input { width: 70px; }
+  details.commission code { background: #eee; padding: 0 0.3em; border-radius: 3px; }
+  #indicator { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+               background: #888; margin-left: 0.6em; vertical-align: middle; }
+  #indicator.open   { background: #4ec94e; }
+  #indicator.closed { background: #f48771; }
+</style>
+</head>
+<body>
+<h2>airRoaster WebSocket console</h2>
+
+<input id="ip" placeholder="192.168.1.x" />
+<button onclick="connect()">Connect</button>
+<button onclick="clearOut()">Clear</button>
+<span id="indicator" class="closed"></span>
+<span id="status-text" style="font-size:0.85em; color:#888; margin-left:0.4em">disconnected</span>
+
+<div class="cmdbar">
+  <input id="cmd" placeholder="type a command, e.g. PID 1.5 0.05 0" autocomplete="off" />
+  <button onclick="sendInput()">Send</button>
+</div>
+
+<div class="quick">
+  <span class="sep">report:</span>
+  <button onclick="send('LOG')">LOG</button>
+  <button onclick="send('PID')">PID</button>
+  <button onclick="send('FF')">FF</button>
+  <button onclick="send('STAT')">STAT</button>
+  <span class="sep">feedforward:</span>
+  <button onclick="send('FF CAL')">FF CAL</button>
+  <button onclick="send('FF OFF')">FF OFF</button>
+  <span class="sep">tune:</span>
+  <button onclick="send('TUNE')">TUNE</button>
+  <button onclick="send('TUNE APPLY')">TUNE APPLY</button>
+  <button onclick="send('TUNE ABORT')">TUNE ABORT</button>
+  <span class="sep">inlet:</span>
+  <button onclick="send('INLET OFF')">INLET OFF</button>
+  <span class="sep">safety:</span>
+  <button onclick="send('IL')">IL</button>
+  <button onclick="send('OT1 0')">HEAT 0</button>
+</div>
+
+<details class="commission">
+  <summary>Commissioning sequence</summary>
+  <ol>
+    <li>
+      <span class="desc"><b>Flash.</b> Not a WebSocket command — run on the host with the board connected:
+      <code>./verify.sh upload</code></span>
+    </li>
+    <li>
+      <span class="desc"><b>Sanity.</b> Stay in manual; confirm sensors/OLED/Artisan behave. After a
+      few minutes read control-cadence jitter (expect single-digit ms).</span>
+      <button onclick="send('STAT')">STAT</button>
+    </li>
+    <li>
+      <span class="desc"><b>Characterize.</b> Set fan, set a moderate heat, let it settle, then step-test.</span>
+      Fan <input id="cFan" value="57" /> <button onclick="sendWith('OT2','cFan')">OT2</button>
+      Heat <input id="cHeat" value="40" /> <button onclick="sendWith('OT1','cHeat')">OT1</button>
+      <button onclick="send('TUNE')">TUNE</button>
+      <span class="desc">Read the result; eyeball dT/Kp/tau/theta for sanity.</span>
+    </li>
+    <li>
+      <span class="desc"><b>Apply gains.</b> Use the tight suggestion, or set the conservative set by hand if tight looks twitchy.</span>
+      <button onclick="send('TUNE APPLY')">TUNE APPLY</button>
+      &nbsp;or&nbsp; kp <input id="cKp" /> ki <input id="cKi" /> kd <input id="cKd" value="0" />
+      <button onclick="sendPid()">PID</button>
+    </li>
+    <li>
+      <span class="desc"><b>Calibrate feedforward.</b> Still steady: set ambient, then auto-calibrate.</span>
+      Amb &deg;C <input id="cAmb" /> <button onclick="sendWith('FF AMB','cAmb')">FF AMB</button>
+      <button onclick="send('FF CAL')">FF CAL</button>
+    </li>
+    <li>
+      <span class="desc"><b>Close the loop.</b> Set the inlet setpoint near the current inlet temp (bumpless),
+      then nudge it and watch tracking.</span>
+      &deg;C <input id="cInlet" /> <button onclick="sendWith('INLET','cInlet')">INLET</button>
+    </li>
+    <li>
+      <span class="desc"><b>The real test.</b> With the loop holding, deliberately change fan speed and confirm
+      inlet temp barely moves — feedforward earning its keep. Tune from there.</span>
+      Fan <input id="cFan2" value="70" /> <button onclick="sendWith('OT2','cFan2')">OT2</button>
+    </li>
+  </ol>
+</details>
+
+<div id="out"></div>
+
+<script>
+let ws;
+
+function connect() {
+  const ip = document.getElementById("ip").value.trim();
+  if (!ip) return;
+  if (ws) ws.close();
+
+  ws = new WebSocket("ws://" + ip + ":81");
+
+  ws.onopen = () => {
+    setStatus("connected", true);
+    log("-- connected to " + ip + " --", "other");
+    ws.send("LOG");
+  };
+
+  ws.onclose = () => {
+    setStatus("disconnected", false);
+    log("-- disconnected --", "other");
+  };
+
+  ws.onerror = () => {
+    setStatus("error", false);
+    log("-- connection error --", "error");
+  };
+
+  ws.onmessage = e => {
+    let cls = "other";
+    try {
+      const obj = JSON.parse(e.data);
+      if (obj.pushMessage === "error") cls = "error";
+      else if (obj.pushMessage === "log")    cls = "log";
+      else if (obj.pushMessage === "status") cls = "status";
+    } catch (_) {}
+    log(e.data, cls);
+  };
+}
+
+function send(cmd) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(cmd);
+    log("> " + cmd, "sent");
+  } else {
+    log("not connected", "error");
+  }
+}
+
+function sendInput() {
+  const input = document.getElementById("cmd");
+  const cmd = input.value.trim();
+  if (!cmd) return;
+  send(cmd);
+  input.value = "";
+}
+
+// Send "<prefix> <value>" using the value from the given input field.
+function sendWith(prefix, inputId) {
+  const v = document.getElementById(inputId).value.trim();
+  if (v === "") { log("(enter a value first)", "error"); return; }
+  send(prefix + " " + v);
+}
+
+// Send "PID kp ki kd" from the three gain fields.
+function sendPid() {
+  const kp = document.getElementById("cKp").value.trim();
+  const ki = document.getElementById("cKi").value.trim();
+  const kd = document.getElementById("cKd").value.trim();
+  if (kp === "" || ki === "" || kd === "") { log("(enter kp, ki, kd)", "error"); return; }
+  send("PID " + kp + " " + ki + " " + kd);
+}
+
+function log(text, cls) {
+  const out = document.getElementById("out");
+  const line = document.createElement("span");
+  line.className = cls;
+  line.textContent = text + "\n";
+  out.appendChild(line);
+  out.scrollTop = out.scrollHeight;
+}
+
+function clearOut() {
+  document.getElementById("out").innerHTML = "";
+}
+
+function setStatus(text, open) {
+  document.getElementById("status-text").textContent = text;
+  const ind = document.getElementById("indicator");
+  ind.className = open ? "open" : "closed";
+}
+
+// Restore last-used IP
+window.onload = () => {
+  const saved = localStorage.getItem("airRoaster_ip");
+  if (saved) document.getElementById("ip").value = saved;
+};
+
+document.getElementById("ip").addEventListener("change", e => {
+  localStorage.setItem("airRoaster_ip", e.target.value);
+});
+
+// Enter in the command box sends; in the IP box connects.
+document.getElementById("cmd").addEventListener("keydown", e => {
+  if (e.key === "Enter") sendInput();
+});
+document.getElementById("ip").addEventListener("keydown", e => {
+  if (e.key === "Enter") connect();
+});
+</script>
+</body>
+</html>

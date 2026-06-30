@@ -34,7 +34,7 @@ during a roast and, before the firmware fix, would drop to 0 °C (= 32 °F in
 Artisan). The K-type thermocouple (MAX31855) on the same SPI bus is unaffected.
 
 Representative fault log (from `LOG` over WebSocket — see
-[`../artisan/log.html`](../artisan/log.html)):
+[`../artisan/dashboard.html`](../artisan/dashboard.html)):
 
 ```
 MAX31865 ET fault: 0x60   <- most common
@@ -310,7 +310,7 @@ ceramic, input cap, and a 5 V point-of-load cap up top) are listed in the
 
 ## Diagnostic workflow
 
-1. Open [`../artisan/log.html`](../artisan/log.html) in a browser, connect to the
+1. Open [`../artisan/dashboard.html`](../artisan/dashboard.html) in a browser, connect to the
    ESP32 IP, and watch the live `error`/`log` stream during a roast.
 2. Note which channel (BT/ET) and which fault codes appear, and whether they
    correlate with fan level, heat level, or are constant.

@@ -295,6 +295,32 @@ With feedforward calibrated, the integrator settles near zero and the loop
 rejects fan-speed changes largely through the feedforward path. Reported as an
 `ff` push message: `{"ffK":0.00451,"amb":24.0,"ff":38.7}`.
 
+---
+
+## Commissioning
+
+Bring the controller up in this order. Every step after the flash is a command
+sent over WebSocket — the console page at [artisan/dashboard.html](artisan/dashboard.html)
+has a **Commissioning sequence** panel that walks these steps with the value
+fields prefilled.
+
+1. **Flash.** With the board connected, run `./verify.sh upload` on the host.
+2. **Sanity.** Stay in `manual`; confirm sensors, OLED, and Artisan still behave.
+   After a few minutes send `STAT` to read control-cadence jitter — this is the
+   evidence on whether the cooperative single-core design holds (expect
+   single-digit ms).
+3. **Characterize.** Set the fan to the center of your range (`OT2 57`) and a
+   moderate heat (`OT1 40`), let the inlet temperature settle, then run `TUNE`.
+   Eyeball the reported `dT`/`Kp`/`tau`/`theta` for sanity.
+4. **Apply gains.** `TUNE APPLY` uses the `tight` suggestion; if it looks twitchy,
+   enter the `cons` set by hand with `PID <kp> <ki> <kd>`.
+5. **Calibrate feedforward.** Still steady, send `FF AMB <ambient>` then `FF CAL`.
+6. **Close the loop.** `INLET <degC>` near the current inlet temp (bumpless), then
+   nudge the setpoint and watch tracking.
+7. **The real test.** With the loop holding, deliberately change fan speed and
+   confirm the inlet temperature barely moves — that is the feedforward earning
+   its keep. Tune gains from there.
+
 ## OLED display layout
 
 ```

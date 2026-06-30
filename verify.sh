@@ -7,7 +7,11 @@
 #         ./verify.sh upload     # compile + upload (auto-detects port)
 set -euo pipefail
 
-cd "$(dirname "$0")"
+# Resolve to the real-case, symlink-free path. macOS is case-insensitive, so
+# `cd ~/airroaster` works but hands arduino-cli a lowercase folder name, which
+# it can't match against airRoaster.ino. realpath canonicalizes the case from
+# the filesystem (unlike `pwd -P`, which trusts the stale $PWD env hint).
+cd "$(realpath "$(dirname "$0")")"
 
 FQBN="esp32:esp32:adafruit_feather_esp32s3"
 SKETCH="airRoaster.ino"
@@ -33,8 +37,15 @@ echo "$out" | grep -E "Sketch uses|Global variables" || true
 echo "==> BUILD OK"
 
 if [[ "${1:-}" == "upload" ]]; then
-  port="$(arduino-cli board list 2>/dev/null | awk '/serial/{print $1; exit}')"
-  if [[ -z "$port" ]]; then echo "==> No serial board detected"; exit 1; fi
+  # Prefer the port arduino-cli identifies as our FQBN; otherwise fall back to
+  # the first USB serial port. Never match the Bluetooth ports (cu.BLTH,
+  # cu.Bluetooth-*), which also report protocol "serial" but aren't the board.
+  list="$(arduino-cli board list 2>/dev/null)"
+  port="$(awk -v fqbn="$FQBN" '$1 ~ /^\/dev\// && index($0, fqbn) {print $1; exit}' <<<"$list")"
+  if [[ -z "$port" ]]; then
+    port="$(awk '$1 ~ /^\/dev\/cu\.(usbmodem|usbserial|wchusbserial|SLAB)/ {print $1; exit}' <<<"$list")"
+  fi
+  if [[ -z "$port" ]]; then echo "==> No ESP32 serial port detected"; echo "$list"; exit 1; fi
   echo "==> Uploading to $port"
   arduino-cli upload --fqbn "$FQBN" -p "$port" "$SKETCH"
 fi

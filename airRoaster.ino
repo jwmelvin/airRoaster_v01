@@ -1,5 +1,5 @@
 // ===========================================================================
-// airRoaster v01 — ESP32-S3 hot-air coffee roaster controller
+// airRoaster — ESP32-S3 hot-air coffee roaster controller
 //
 // Firmware version: see FW_VERSION below.
 // Change history:   bottom of this file.

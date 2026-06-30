@@ -1,4 +1,4 @@
-# Artisan Configuration Context — airRoaster v01
+# Artisan Configuration Context — airRoaster
 
 ## Goal
 
@@ -12,7 +12,7 @@ Configure Artisan to:
 
 | Device | Role |
 |--------|------|
-| ESP32 (airRoaster v01 firmware) | Roaster controller — controls heat and fan via I2C AC dimmers |
+| ESP32 (airRoaster firmware) | Roaster controller — controls heat and fan via I2C AC dimmers |
 | Phidget HUB5000 | VINT hub, networked at `192.168.1.232` (also reachable as `hub5000.local`) |
 | Phidget TMP1200 on HUB VINT port 0 | RTD input, PT1000 probe → **BT (bean temperature)** |
 | Phidget TMP1101 on HUB VINT port 1 | 4-channel thermocouple input, K-type probe on channel 0 → **ET (exhaust temperature)** |
@@ -134,7 +134,7 @@ The `ilCap` field in the status broadcast shows the current ceiling.
 
 ## Existing .aset file
 
-A partially-configured Artisan settings file exists at `artisan/airRoaster_v01.aset` in the firmware repo. It was originally configured with:
+A partially-configured Artisan settings file exists at `artisan/airRoaster.aset` in the firmware repo. It was originally configured with:
 - WebSocket as main device (now should move to extra device / control only)
 - Sliders using Serial action (now updated to WebSocket `send()`)
 - Phidgets not yet configured

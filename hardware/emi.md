@@ -2,7 +2,7 @@
 
 How the AC dimmers couple noise into the temperature sensors, what's been done
 about it, and what's left. Referenced from the sensor code in
-[`../airRoaster_v01.ino`](../airRoaster_v01.ino) (`serviceRtd()` and the
+[`../airRoaster.ino`](../airRoaster.ino) (`serviceRtd()` and the
 robust-read constants).
 
 ---
@@ -120,7 +120,7 @@ correctly and should stay at 60 Hz.
 
 ### Software (v0.2.0)
 
-`serviceRtd()` in [`../airRoaster_v01.ino`](../airRoaster_v01.ino) makes the
+`serviceRtd()` in [`../airRoaster.ino`](../airRoaster.ino) makes the
 read robust instead of trusting a single fault byte:
 
 - **Same-cycle glitch rejection** — two reads per cycle; if they disagree by

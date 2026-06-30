@@ -1,4 +1,4 @@
-# airRoaster v01
+# airRoaster
 
 ESP32-based controller for a hot-air coffee roaster. Controls a heating element and fan independently via two [RBDimmer DimmerLink](https://www.rbdimmer.com/docs/dimmerlink-I2CCommunication) I2C AC dimmers, with a WebSocket interface for remote control and an OLED display for local status.
 
@@ -337,7 +337,7 @@ Retrieve the log at any time by sending `LOG` over WebSocket.
 
 ## Artisan integration
 
-A ready-to-import Artisan settings file is provided at `artisan/airRoaster_v01.aset` in this repo.
+A ready-to-import Artisan settings file is provided at `artisan/airRoaster.aset` in this repo.
 
 **Before importing**, open the file in a text editor and replace `<device-ip>` with your ESP32's IP address (shown on the OLED at startup). Then import via **File › Load Settings** in Artisan.
 

@@ -10,18 +10,18 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 FQBN="esp32:esp32:adafruit_feather_esp32s3"
-SKETCH="airRoaster_v01.ino"
+SKETCH="airRoaster.ino"
 
 echo "==> Compiling $SKETCH for $FQBN"
 # --warnings all surfaces sketch issues; we grep our own file out of the noise.
 out="$(arduino-cli compile --fqbn "$FQBN" --warnings all "$SKETCH" 2>&1)" || {
-  echo "$out" | grep -iE "error:|airRoaster_v01" || true
+  echo "$out" | grep -iE "error:|airRoaster" || true
   echo "==> BUILD FAILED"
   exit 1
 }
 
 # Surface any warning/error that references our sketch (should be none).
-sketch_msgs="$(echo "$out" | grep -iE "airRoaster_v01.*(warning|error)" || true)"
+sketch_msgs="$(echo "$out" | grep -iE "airRoaster.*(warning|error)" || true)"
 if [[ -n "$sketch_msgs" ]]; then
   echo "==> Sketch warnings/errors:"
   echo "$sketch_msgs"

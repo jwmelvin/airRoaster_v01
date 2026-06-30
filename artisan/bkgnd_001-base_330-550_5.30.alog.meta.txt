@@ -1,0 +1,6 @@
+generator: make_inlet_background.py
+mode: ror_endpoint
+anchors_t_T: [(0.0, 350.0), (None, None), (None, None), (330.0, 550.0)]
+interval_s: 1.0
+inlet_channel_bvar: B3
+note: PID Follow Background should reference background variable B3 for inlet SV; set PID input to your live Inlet probe.
